@@ -1218,3 +1218,1116 @@ function App() {
 }
 ```
 
+<br>
+<br>
+<br>
+
+# Performance
+<br>
+<br>
+
+## Code Splitting
+
+Te permite cargar el codigo solo cuando se necesita. Imaginemos que mostraremos algo pesado de cargar al momento de hacer un click en un boton, no es necesario cargarlo antes del click, por lo que podriamos hacer un dynamic import para cargar el codigo solo cuando lo necesitemos.
+
+```javascript
+import('/some-module.js').then(
+  module => {
+    // do stuff with the module's exports
+  },
+  error => {
+    // there was some error loading the module...
+  },
+)
+```
+
+React tiene soporte para cargar modulos como si fueran React components. El modulo debe tener un React component como default export y es necesario usaer React Suspense para renderizar un fallback mientras el componente se carga.
+
+```javascript
+// smiley-face.js
+import * as React from 'react'
+
+function SmileyFace() {
+  return <div>😃</div>
+}
+
+export default SmileyFace
+
+// app.js
+import * as React from 'react'
+
+const SmileyFace = React.lazy(() => import('./smiley-face'))
+
+function App() {
+  return (
+    <div>
+      <React.Suspense fallback={<div>loading...</div>}>
+        <SmileyFace />
+      </React.Suspense>
+    </div>
+  )
+}
+```
+
+otro ejemplo:
+
+```javascript
+import * as React from 'react'
+
+const Globe = React.lazy(() => import('../globe'))
+
+function App() {
+  const [showGlobe, setShowGlobe] = React.useState(false)
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        height: '100%',
+        padding: '2rem',
+      }}
+    >
+      <label style={{marginBottom: '1rem'}}>
+        <input
+          type="checkbox"
+          checked={showGlobe}
+          onChange={e => setShowGlobe(e.target.checked)}
+        />
+        {' show globe'}
+      </label>
+      <div style={{width: 400, height: 400}}>
+        <React.Suspense fallback={<div>loading globe...</div>}>
+          {showGlobe ? <Globe /> : null}
+        </React.Suspense>
+      </div>
+    </div>
+  )
+}
+
+export default App
+```
+
+
+En el caso anterior se esta cargando un globo terraque cuando se hace click en un checkbox, ahora bien, imaginemos que el 90% del tiempo la gente ingresa a la pagina para ver ese globo, no queremos que primero espere para cargar la pagina y luego para cargar el globo. Seria bueno empezar a cargar el globo tan pronto el usuario hace un hover.
+
+
+```javascript
+
+import * as React from 'react'
+
+const loadGlobe = () => import('../globe')
+const Globe = React.lazy(loadGlobe)
+
+function App() {
+  const [showGlobe, setShowGlobe] = React.useState(false)
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        height: '100%',
+        padding: '2rem',
+      }}
+    >
+      <label
+        style={{marginBottom: '1rem'}}
+        onMouseEnter={loadGlobe}
+        onFocus={loadGlobe}
+      >
+        <input
+          type="checkbox"
+          checked={showGlobe}
+          onChange={e => setShowGlobe(e.target.checked)}
+        />
+        {' show globe'}
+      </label>
+      <div style={{width: 400, height: 400}}>
+        <React.Suspense fallback={<div>loading globe...</div>}>
+          {showGlobe ? <Globe /> : null}
+        </React.Suspense>
+      </div>
+    </div>
+  )
+}
+
+export default App
+
+```
+
+
+Si estas utilizando webpack para el bundle, podes usar webpack magic component para hacer prefetch de dynamics imports (https://webpack.js.org/api/module-methods/#magic-comments)
+
+
+```javascript
+import(/* webpackPrefetch: true */ './some-module.js')
+```
+
+Webpack agregara al head
+
+```javascript
+<link rel="prefetch" as="script" href="/static/js/1.chunk.js">
+```
+De esta manera el browser el browser hara el load del js dentro del browser cache, estando disponible por adelantado.
+
+Otra cosa que se puede chequear es 'webpackChunkName', usarlo, permitirá a webpack poner módulos comunes en el mismo chunk. Esto es bueno para componentes que queremos cargar juntos en el mismo chunk (para reducir múltiples requests para múltiples módulos que necesitaremos que estén juntos.)
+
+
+
+<br>
+<br>
+
+## useMemo
+
+Este hook nos permite memorizar los resultados de cálculos que pueden ser pesados de calcular. Pensemos que si es una funcion que esta en nuestro componente se ejecutara en cada re render.
+
+```jsx
+function Distance({x, y}) {
+  const distance = calculateDistance(x, y)
+  return (
+    <div>
+      The distance between {x} and {y} is {distance}.
+    </div>
+  )
+}
+```
+
+Si el componente padre se re renderiza, o si agregamos algo de estado y este cambia, el componente se estaria re renderizando, realizando el cálculo de la distancia en cada re render.
+
+```jsx
+function Distance({x, y}) {
+  const distance = React.useMemo(() => calculateDistance(x, y), [x, y])
+  return (
+    <div>
+      The distance between {x} and {y} is {distance}.
+    </div>
+  )
+}
+```
+
+El uso del hook nos permite re calcular la distancia solo cuando el valor x o y cambia, y no en cada re render.
+
+<br>
+<br>
+
+## React Memo
+
+Un componente se re renderiza por los siguientes motivos:
+- Alguna de sus props cambia
+- Cambia un estado interno del componente
+- Esta consumiendo velues de un contexto que cambiaron
+- Su padre se re renderizo
+
+Si bien React es muy rápido, a veces puede ser util indicarle a React que cierta parte del arbol se re renderice solo si el estado cambio.
+ Para lograr eso react nos ofrece 'React.PureComponent', 'shouldComponentUpdate', estos dos para class components y 'React.memo' para functional components.
+ Debemos usar estas herramientas solo cuando sean necesarias, y no andar colocando React.memo en cada componente.
+ Aqui un ejemplo, aplicando React.memo en este caso, evitamos que el Input se re renderice cuando el count cambia.
+
+```jsx
+function CountButton({count, onClick}) {
+  return <button onClick={onClick}>{count}</button>
+}
+CountButton = React.memo(CountButton)
+
+function NameInput({name, onNameChange}) {
+  return (
+    <label>
+      Name: <input value={name} onChange={e => onNameChange(e.target.value)} />
+    </label>
+  )
+}
+NameInput = React.memo(NameInput)
+
+
+function Example() {
+  const [name, setName] = React.useState('')
+  const [count, setCount] = React.useState(0)
+  const increment = () => setCount(c => c + 1)
+  return (
+    <div>
+      <div>
+        <CountButton count={count} onClick={increment} />
+      </div>
+      <div>
+        <NameInput name={name} onNameChange={setName} />
+      </div>
+      {name ? <div>{`${name}'s favorite number is ${count}`}</div> : null}
+    </div>
+  )
+}
+
+```
+
+React.memo nos permite usar un comparador custom para que nosotros decidamos cuando el componente se deberia re renderizar.
+
+
+
+```javascript
+
+function ListItem({
+  getItemProps,
+  item,
+  index,
+  selectedItem,
+  highlightedIndex,
+  ...props
+}) {
+  const isSelected = selectedItem?.id === item.id
+  const isHighlighted = highlightedIndex === index
+  return (
+    <li
+      {...getItemProps({
+        index,
+        item,
+        style: {
+          fontWeight: isSelected ? 'bold' : 'normal',
+          backgroundColor: isHighlighted ? 'lightgray' : 'inherit',
+        },
+        ...props,
+      })}
+    />
+  )
+}
+ListItem = React.memo(ListItem, (prevProps, nextProps) => {
+  // true means do NOT rerender
+  // false means DO rerender
+
+  // these ones are easy if any of these changed, we should re-render
+  if (prevProps.getItemProps !== nextProps.getItemProps) return false
+  if (prevProps.item !== nextProps.item) return false
+  if (prevProps.index !== nextProps.index) return false
+  if (prevProps.selectedItem !== nextProps.selectedItem) return false
+
+  // this is trickier. We should only re-render if this list item:
+  // 1. was highlighted before and now it's not
+  // 2. was not highlighted before and now it is
+  if (prevProps.highlightedIndex !== nextProps.highlightedIndex) {
+    const wasPrevHighlighted = prevProps.highlightedIndex === prevProps.index
+    const isNowHighlighted = nextProps.highlightedIndex === nextProps.index
+    return wasPrevHighlighted === isNowHighlighted
+  }
+  return true
+})
+
+```
+
+Algo importante, si a nuestro componente que wrappeamos con React.memo le pasamos valores primitivos, React se encargara del cálculo y no hace falta que hagamos un comparador custom.
+ En el caso anterior seria, pasar 'isSelected' y 'isHighlighted' como prop en lugar de calcularlo.
+
+<br>
+<br>
+
+
+## Optimizar values del contexto.
+
+
+```jsx
+const CountContext = React.createContext()
+
+function CountProvider(props) {
+  const [count, setCount] = React.useState(0)
+  const value = [count, setCount]
+  return <CountContext.Provider value={value} {...props} />
+}
+```
+Cada vez que el CountProvider es re renderizado the value object es uno nuevo, por ende, aunque el count no haya cambiado, todos los componentes que lo consumen seran re renderizados.
+ Una manera facil de solucionar este problema es usando useMemo para el value del contexto.
+
+ ```jsx
+const CountContext = React.createContext()
+
+function CountProvider(props) {
+  const [count, setCount] = React.useState(0)
+  const value = React.useMemo(() => [count, setCount], [count])
+  return <CountContext.Provider value={value} {...props} />
+}
+```
+
+
+Otra opcion para mejorar la performance con los contexts, es separándolos, tal vez un componente haga uso del dispatch del context anterior, pero no del state o viceverza.
+
+
+```javascript
+
+function AppProvider({children}) {
+  const [state, dispatch] = React.useReducer(appReducer, {
+    dogName: '',
+    grid: initialGrid,
+  })
+  return (
+    <AppStateContext.Provider value={state}>
+      <AppDispatchContext.Provider value={dispatch}>
+        {children}
+      </AppDispatchContext.Provider>
+    </AppStateContext.Provider>
+  )
+}
+
+function useAppState() {
+  const context = React.useContext(AppStateContext)
+  if (!context) {
+    throw new Error('useAppState must be used within the AppProvider')
+  }
+  return context
+}
+
+function useAppDispatch() {
+  const context = React.useContext(AppDispatchContext)
+  if (!context) {
+    throw new Error('useAppDispatch must be used within the AppProvider')
+  }
+  return context
+}
+
+```
+
+
+
+<br>
+<br>
+
+
+## Slice app state
+
+Algo que podemos hacer para mejorar la performance, por ejemplo en aquellos casos que se consume state de un context y tal vez eso hace que un monton de componentes se re rendericen sin necesidad, es hacer un slice del state que necesitamos con un HOC (high order componet).
+
+![image](./grid.png)
+
+Esta grilla por ejemplo, cada una de las celdas tiene un evento onClick, que despacha un action en nuestro reducer de un context, por lo que hace que todas las celdas se re rendericen porque cada una de ellas estan haciendo uso del state del context.
+  En esta situacion se puede hacer un HOC que haga de wrap del componente, donde se accede al state deseado y se pasa como prop al componente wrappeado.
+Este patron es el que usa react-redux con su connect para acceder a las partes del store desesadas.
+
+```javascript
+
+function withStateSlice(Comp, slice) {
+  const MemoComp = React.memo(Comp)
+  function Wrapper(props, ref) {
+    const state = useAppState()
+    const cell = slice(state, props)
+    return <MemoComp ref={ref} state={cell} {...props} />
+  }
+  Wrapper.displayName = `withStateSlice(${Comp.displayName || Comp.name})`
+  return React.memo(React.forwardRef(Wrapper))
+}
+
+function Cell({state: cell, row, column}) {
+  const dispatch = useAppDispatch()
+  const handleClick = () => dispatch({type: 'UPDATE_GRID_CELL', row, column})
+  return (
+    <button
+      className="cell"
+      onClick={handleClick}
+      style={{
+        color: cell > 50 ? 'white' : 'black',
+        backgroundColor: `rgba(0, 0, 0, ${cell / 100})`,
+      }}
+    >
+      {Math.floor(cell)}
+    </button>
+  )
+}
+Cell = withStateSlice(Cell, (state, {row, column}) => state.grid[row][column])
+
+
+```
+
+<br>
+<br>
+<br>
+
+# Testing
+<br>
+<br>
+
+### React testing library
+
+Ejemplo básico
+
+```javascript
+import * as React from 'react'
+import {render, screen} from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import Counter from '../../components/counter'
+
+test('counter increments and decrements when the buttons are clicked', () => {
+  render(<Counter />)
+  const increment = screen.getByRole('button', {name: /increment/i})
+  const decrement = screen.getByRole('button', {name: /decrement/i})
+  const message = screen.getByText(/current count/i)
+
+  expect(message).toHaveTextContent('Current count: 0')
+  userEvent.click(increment)
+  expect(message).toHaveTextContent('Current count: 1')
+  userEvent.click(decrement)
+  expect(message).toHaveTextContent('Current count: 0')
+})
+
+```
+
+### Detalles de implementación
+
+Una de las cosas más importantes que hay que recordar a la  hora de probar nuestro software de la manera que se utiliza es evitar probar los detalles de implementación. "Detalles de implementación" es un término que se refiere a cómo una abstracción logra un determinado resultado. Gracias a la expresividad del código, normalmente se puede conseguir el mismo resultado utilizando detalles de implementación completamente diferentes. Por ejemplo:
+
+
+```javascript
+const multiply = (a, b) => a * b
+```
+
+vs
+
+```javascript
+function multiply(a, b) {
+  let total = 0
+  for (let i = 0; i < b; i++) {
+    total += a
+  }
+  return total
+}
+```
+
+Uno de ellos es más claro que el otro, pero eso es irrelevante para el punto:
+La implementación de tus abstracciones no importa a los usuarios de tu abstracción y si quieres tener confianza en que sigue funcionando a través de a través de  efactorizaciones, entonces **tampoco deberían hacerlo tus pruebas.**
+
+Ejemplo de React:
+
+```javascript
+function Counter() {
+  const [count, setCount] = React.useState(0)
+  const increment = () => setCount(c => c + 1)
+  return <button onClick={increment}>{count}</button>
+}
+```
+
+Esta sería una manera de acceder al button, para clickearlo y realizar el test
+
+```javascript
+const {container} = render(<Counter />)
+container.firstChild // <-- that's the button
+```
+
+However, what if we changed it a bit:
+
+```javascript
+function Counter() {
+  const [count, setCount] = React.useState(0)
+  const increment = () => setCount(c => c + 1)
+  return (
+    <span>
+      <button onClick={increment}>{count}</button>
+    </span>
+  )
+}
+```
+
+Sin embargo, si lo cambiamos un poco el etiquetado:
+
+```javascript
+function Counter() {
+  const [count, setCount] = React.useState(0)
+  const increment = () => setCount(c => c + 1)
+  return (
+    <span>
+      <button onClick={increment}>{count}</button>
+    </span>
+  )
+}
+```
+
+Nuestro test se rompería, y la única diferencia existente entre los dos casos es lo que wrappea al button. Pero no hay diferencia en lo que el usuario ve o en como funciona el componente.
+  Entonces, hay una mejor manera de acceder al button para hacer el test, libre de detalles de implementación, y si hiceramos un refactor, seguiría funcionando.
+
+
+```javascript
+render(<Counter />)
+screen.getByText('0') // <-- that's the button
+// or (even better) you can do this:
+screen.getByRole('button', {name: '0'}) // <-- that's the button
+```
+
+Respecto a como hacer query de los elementos del dom(como tomarlos para el testing), hay un orden de prioridades recomendado que puede encontrarse aqui
+ https://testing-library.com/docs/queries/about
+
+Ademas esta página es buena referencia, donde pasamos html y nos dirá cual es el query mas recomendado.
+https://testing-playground.com/
+
+
+### Helpers
+
+screen.debug() -> podes ver en consola que se renderiza.
+
+
+### Test de un form, ejemplo
+
+```javascript
+import * as React from 'react'
+import {render, screen} from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import Login from '../../components/login'
+
+test('submitting the form calls onSubmit with username and password', () => {
+  const handleSubmit = jest.fn()
+  render(<Login onSubmit={handleSubmit} />)
+  const username = 'chucknorris'
+  const password = 'i need no password'
+
+  userEvent.type(screen.getByLabelText(/username/i), username)
+  userEvent.type(screen.getByLabelText(/password/i), password)
+  userEvent.click(screen.getByRole('button', {name: /submit/i}))
+
+  expect(handleSubmit).toHaveBeenCalledWith({
+    username,
+    password,
+  })
+  expect(handleSubmit).toHaveBeenCalledTimes(1)
+})
+
+```
+
+
+### Mock requests
+
+Probar que nuestro código del frontend interactúa con el backend es importante. Así es como el usuario utiliza nuestras aplicaciones, así que es lo que nuestras pruebas deben hacer también si queremos la máxima confianza. Sin embargo, hay varios desafíos que vienen con hacer eso. La configuración necesaria para que esto funcione no es trivial. Es importante, sin duda, que probemos esa integración, pero podemos hacerlo con un conjunto de pruebas E2E utilizando una herramienta como [Cypress](https://cypress.io).
+
+Para nuestras pruebas de componentes de integración y de unidad usareos Jest, pondremos en marcha un servidor simulado para manejar todos los las peticiones de `window.fetch` que hagamos durante nuestras pruebas.
+
+Para manejar estas peticiones fetch, vamos a iniciar un "servidor" que no es servidor, sino simplemente un interceptor de peticiones. Esto hace que sea muy fácil
+de configurar las cosas (porque no tenemos que preocuparnos de encontrar un puerto disponible para que el servidor escuche y asegurarse de que estamos haciendo peticiones al puerto correcto) y también nos permite imitar las peticiones hechas a otros dominios.
+
+Podemos usar la libreria [MSW](https://mswjs.io/)  para interceptar los requests e indicar que data devolver.
+
+Ejemplo simple:
+
+```javascript
+
+import * as React from 'react'
+import {render, screen, waitForElementToBeRemoved} from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import {build, fake} from '@jackfranklin/test-data-bot'
+import {rest} from 'msw'
+import {setupServer} from 'msw/node'
+import Login from '../../components/login-submission'
+
+const buildLoginForm = build({
+  fields: {
+    username: fake(f => f.internet.userName()),
+    password: fake(f => f.internet.password()),
+  },
+})
+
+const server = setupServer(
+  rest.post(
+    'https://auth-provider.example.com/api/login',
+    async (req, res, ctx) => {
+      if (!req.body.password) {
+        return res(ctx.status(400), ctx.json({message: 'password required'}))
+      }
+      if (!req.body.username) {
+        return res(ctx.status(400), ctx.json({message: 'username required'}))
+      }
+      return res(ctx.json({username: req.body.username}))
+    },
+  ),
+)
+
+beforeAll(() => server.listen())
+afterAll(() => server.close())
+
+test(`logging in displays the user's username`, async () => {
+  render(<Login />)
+  const {username, password} = buildLoginForm()
+
+  userEvent.type(screen.getByLabelText(/username/i), username)
+  userEvent.type(screen.getByLabelText(/password/i), password)
+  userEvent.click(screen.getByRole('button', {name: /submit/i}))
+
+  await waitForElementToBeRemoved(() => screen.getByLabelText(/loading/i))
+
+  expect(screen.getByText(username)).toBeInTheDocument()
+})
+
+```
+
+Si vemos en detalle, estamos definiendo nuestro server en el mismo test, probablemente tengamos que re utilizar los request usados en este test en otros, por lo que es una buena idea abstraer esa lógica a otro lugar.
+
+
+```javascript
+
+/// test/server-handlers
+import {rest} from 'msw'
+
+const delay = process.env.NODE_ENV === 'test' ? 0 : 1500
+
+const handlers = [
+  rest.post(
+    'https://auth-provider.example.com/api/login',
+    async (req, res, ctx) => {
+      if (!req.body.password) {
+        return res(
+          ctx.delay(delay),
+          ctx.status(400),
+          ctx.json({message: 'password required'}),
+        )
+      }
+      if (!req.body.username) {
+        return res(
+          ctx.delay(delay),
+          ctx.status(400),
+          ctx.json({message: 'username required'}),
+        )
+      }
+      return res(ctx.delay(delay), ctx.json({username: req.body.username}))
+    },
+  ),
+]
+
+export {handlers}
+
+
+```
+
+
+```javascript
+
+import * as React from 'react'
+import {render, screen, waitForElementToBeRemoved} from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import {build, fake} from '@jackfranklin/test-data-bot'
+import {setupServer} from 'msw/node'
+import {handlers} from 'test/server-handlers'
+import Login from '../../components/login-submission'
+
+const buildLoginForm = build({
+  fields: {
+    username: fake(f => f.internet.userName()),
+    password: fake(f => f.internet.password()),
+  },
+})
+
+const server = setupServer(...handlers)
+
+beforeAll(() => server.listen())
+afterAll(() => server.close())
+
+test(`logging in displays the user's username`, async () => {
+  render(<Login />)
+  const {username, password} = buildLoginForm()
+
+  userEvent.type(screen.getByLabelText(/username/i), username)
+  userEvent.type(screen.getByLabelText(/password/i), password)
+  userEvent.click(screen.getByRole('button', {name: /submit/i}))
+
+  await waitForElementToBeRemoved(() => screen.getByLabelText(/loading/i))
+
+  expect(screen.getByText(username)).toBeInTheDocument()
+})
+
+
+```
+
+
+En este ejemplo de abajo, vamos a testear cuando un request falla, lo que hacemos, es en el test que lo necesitamos pisar uno de los request que tenemos mockeados en nuestro server de prueba con un caso fallido
+
+```javascript
+
+import * as React from 'react'
+import {render, screen, waitForElementToBeRemoved} from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import {build, fake} from '@jackfranklin/test-data-bot'
+import {rest} from 'msw'
+import {setupServer} from 'msw/node'
+import {handlers} from 'test/server-handlers'
+import Login from '../../components/login-submission'
+
+const buildLoginForm = build({
+  fields: {
+    username: fake(f => f.internet.userName()),
+    password: fake(f => f.internet.password()),
+  },
+})
+
+const server = setupServer(...handlers)
+
+beforeAll(() => server.listen())
+afterAll(() => server.close())
+afterEach(() => server.resetHandlers())
+
+test(`logging in displays the user's username`, async () => {
+  render(<Login />)
+  const {username, password} = buildLoginForm()
+
+  userEvent.type(screen.getByLabelText(/username/i), username)
+  userEvent.type(screen.getByLabelText(/password/i), password)
+  userEvent.click(screen.getByRole('button', {name: /submit/i}))
+
+  await waitForElementToBeRemoved(() => screen.getByLabelText(/loading/i))
+
+  expect(screen.getByText(username)).toBeInTheDocument()
+})
+
+test('omitting the password results in an error', async () => {
+  render(<Login />)
+  const {username} = buildLoginForm()
+
+  userEvent.type(screen.getByLabelText(/username/i), username)
+  // don't type in the password
+  userEvent.click(screen.getByRole('button', {name: /submit/i}))
+
+  await waitForElementToBeRemoved(() => screen.getByLabelText(/loading/i))
+
+  expect(screen.getByRole('alert').textContent).toMatchInlineSnapshot(
+    `"password required"`,
+  )
+})
+
+test('unknown server error displays the error message', async () => {
+  const testErrorMessage = 'Oh no, something bad happened'
+  server.use(
+    rest.post(
+      'https://auth-provider.example.com/api/login',
+      async (req, res, ctx) => {
+        return res(ctx.status(500), ctx.json({message: testErrorMessage}))
+      },
+    ),
+  )
+  render(<Login />)
+  userEvent.click(screen.getByRole('button', {name: /submit/i}))
+
+  await waitForElementToBeRemoved(() => screen.getByLabelText(/loading/i))
+
+  expect(screen.getByRole('alert')).toHaveTextContent(testErrorMessage)
+})
+
+```
+
+
+### Mock Browser APIs y Módulos
+
+Muchas veces nos sucedera que estamos usando funcionalidades externas, pudiendo ser de una libreria, del propio browser o asi mismo nuestras. Y no se supone que nosotros debamos testear dichas funcionalidades, aquí es donde entra el mock en juego.
+ Aquí debajo hay un ejemplo en el que estamos mockeando la api 'gegolocation' del navegador.
+
+```javascript
+
+import * as React from 'react'
+import {render, screen, act} from '@testing-library/react'
+import Location from '../../examples/location'
+
+beforeAll(() => {
+  window.navigator.geolocation = {
+    getCurrentPosition: jest.fn(),
+  }
+})
+
+function deferred() {
+  let resolve, reject
+  const promise = new Promise((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return {promise, resolve, reject}
+}
+
+test('displays the users current location', async () => {
+  const fakePosition = {
+    coords: {
+      latitude: 35,
+      longitude: 139,
+    },
+  }
+  const {promise, resolve} = deferred()
+  window.navigator.geolocation.getCurrentPosition.mockImplementation(
+    callback => {
+      promise.then(() => callback(fakePosition))
+    },
+  )
+
+  render(<Location />)
+
+  expect(screen.getByLabelText(/loading/i)).toBeInTheDocument()
+
+  await act(async () => {
+    resolve()
+    await promise
+  })
+
+  expect(screen.queryByLabelText(/loading/i)).not.toBeInTheDocument()
+
+  expect(screen.getByText(/latitude/i)).toHaveTextContent(
+    `Latitude: ${fakePosition.coords.latitude}`,
+  )
+  expect(screen.getByText(/longitude/i)).toHaveTextContent(
+    `Longitude: ${fakePosition.coords.longitude}`,
+  )
+})
+
+```
+
+
+Ejemplo mock de un módulo entero
+
+
+```javascript
+
+import * as React from 'react'
+import {render, screen, act} from '@testing-library/react'
+import {useCurrentPosition} from 'react-use-geolocation'
+import Location from '../../examples/location'
+
+jest.mock('react-use-geolocation')
+
+test('displays the users current location', async () => {
+  const fakePosition = {
+    coords: {
+      latitude: 35,
+      longitude: 139,
+    },
+  }
+
+  let setReturnValue
+  function useMockCurrentPosition() {
+    const state = React.useState([])
+    setReturnValue = state[1]
+    return state[0]
+  }
+  useCurrentPosition.mockImplementation(useMockCurrentPosition)
+
+  render(<Location />)
+  expect(screen.getByLabelText(/loading/i)).toBeInTheDocument()
+
+  act(() => {
+    setReturnValue([fakePosition])
+  })
+
+  expect(screen.queryByLabelText(/loading/i)).not.toBeInTheDocument()
+  expect(screen.getByText(/latitude/i)).toHaveTextContent(
+    `Latitude: ${fakePosition.coords.latitude}`,
+  )
+  expect(screen.getByText(/longitude/i)).toHaveTextContent(
+    `Longitude: ${fakePosition.coords.longitude}`,
+  )
+})
+
+```
+
+### Act
+
+Links de ayuda:
+
+https://reactjs.org/docs/test-utils.html#act
+https://kentcdodds.com/blog/fix-the-not-wrapped-in-act-warning
+
+Cuando desde nuestro test hacemos un update de state de un componente, React no lo esta esperando y eso tiene cierto side effects, entonces wrappear la accion que esta cambiando el estado en un act le indica a React que intencionalmente estamos ejecutando y que se encargue de limpiar los posibles side effects.
+
+ejemplo:
+
+```javascript
+
+import * as React from 'react'
+import {render, screen, act} from '@testing-library/react'
+import Location from '../../examples/location'
+
+beforeAll(() => {
+  window.navigator.geolocation = {
+    getCurrentPosition: jest.fn(),
+  }
+})
+
+function deferred() {
+  let resolve, reject
+  const promise = new Promise((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return {promise, resolve, reject}
+}
+
+test('displays the users current location', async () => {
+  const fakePosition = {
+    coords: {
+      latitude: 35,
+      longitude: 139,
+    },
+  }
+  const {promise, resolve} = deferred()
+  window.navigator.geolocation.getCurrentPosition.mockImplementation(
+    callback => {
+      promise.then(() => callback(fakePosition))
+    },
+  )
+
+  render(<Location />)
+
+  expect(screen.getByLabelText(/loading/i)).toBeInTheDocument()
+
+  await act(async () => {
+    resolve()
+    await promise
+  })
+
+  expect(screen.queryByLabelText(/loading/i)).not.toBeInTheDocument()
+
+  expect(screen.getByText(/latitude/i)).toHaveTextContent(
+    `Latitude: ${fakePosition.coords.latitude}`,
+  )
+  expect(screen.getByText(/longitude/i)).toHaveTextContent(
+    `Longitude: ${fakePosition.coords.longitude}`,
+  )
+})
+
+```
+
+### Components que consumen contexts
+
+Si nuestros componentes utilizan un context, seria un error testear los mismos sin dicho context, porque el componente no funcionará. En esos casos lo que debemos hacer es wrappear nuestro componente a testear con el Context Provider que necesita para funcionar correctamente.
+
+Ejemplo:
+
+```javascript
+import * as React from 'react'
+import {render, screen} from '@testing-library/react'
+import {ThemeProvider} from '../../components/theme'
+import EasyButton from '../../components/easy-button'
+
+test('renders with the light styles for the light theme', () => {
+  const Wrapper = ({children}) => (
+    <ThemeProvider initialTheme="light">{children}</ThemeProvider>
+  )
+  render(<EasyButton>Easy</EasyButton>, {wrapper: Wrapper})
+  const button = screen.getByRole('button', {name: /easy/i})
+  expect(button).toHaveStyle(`
+    background-color: white;
+    color: black;
+  `)
+})
+
+```
+
+Hasta podemos crear una funcion custom para renderizar nuestro componentes en los tests, ayudandonos de la opcion 'wrapper' que nos da react testing library.
+
+
+```javascript
+
+import * as React from 'react'
+import {render, screen} from '@testing-library/react'
+import {ThemeProvider} from '../../components/theme'
+import EasyButton from '../../components/easy-button'
+
+function renderWithProviders(ui, {theme = 'light', ...options} = {}) {
+  const Wrapper = ({children}) => (
+    <ThemeProvider value={[theme, () => {}]}>{children}</ThemeProvider>
+  )
+  return render(ui, {wrapper: Wrapper, ...options})
+}
+
+test('renders with the light styles for the light theme', () => {
+  renderWithProviders(<EasyButton>Easy</EasyButton>)
+  const button = screen.getByRole('button', {name: /easy/i})
+  expect(button).toHaveStyle(`
+    background-color: white;
+    color: black;
+  `)
+})
+
+test('renders with the dark styles for the dark theme', () => {
+  renderWithProviders(<EasyButton>Easy</EasyButton>, {
+    theme: 'dark',
+  })
+  const button = screen.getByRole('button', {name: /easy/i})
+  expect(button).toHaveStyle(`
+    background-color: black;
+    color: white;
+  `)
+})
+
+```
+
+### Test Custom Hooks
+
+La mayor parte del tiempo, nuestros custom hooks serún usados para un par de componentes, por ende, testear esos componentes seria suficiente, ya que indeirectamente estaríamos testeando nuestro custom hooks.
+ Pero si estamos utilizando un hook que se usara mucho, o tal vez una libreria de hooks, en ese caso puede ser util testearlo.
+  Tal vez la primer manera sería testear el custom hook usándose con un componente. Pero si por algun motivo no fuera suficiente podemos utilizar la libreria de testing library hecha exclusivamente para los hooks, donde tendremos acceso a 'renderizar' el hook y los valores que devuelve.
+
+
+Ejemplo testeando un custom hook con un componente fake.
+
+```javascript
+
+import * as React from 'react'
+import {render, screen} from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import useCounter from '../../components/use-counter'
+
+function UseCounterHookExample() {
+  const {count, increment, decrement} = useCounter()
+  return (
+    <div>
+      <div>Current count: {count}</div>
+      <button onClick={decrement}>Decrement</button>
+      <button onClick={increment}>Increment</button>
+    </div>
+  )
+}
+
+test('exposes the count and increment/decrement functions', () => {
+  render(<UseCounterHookExample />)
+  const increment = screen.getByRole('button', {name: /increment/i})
+  const decrement = screen.getByRole('button', {name: /decrement/i})
+  const message = screen.getByText(/current count/i)
+
+  expect(message).toHaveTextContent('Current count: 0')
+  userEvent.click(increment)
+  expect(message).toHaveTextContent('Current count: 1')
+  userEvent.click(decrement)
+  expect(message).toHaveTextContent('Current count: 0')
+})
+
+```
+
+Ejemplo usando la libreria @testint/library/react-hooks
+
+
+```javascript
+
+import {renderHook, act} from '@testing-library/react-hooks'
+import useCounter from '../../components/use-counter'
+
+test('exposes the count and increment/decrement functions', () => {
+  const {result} = renderHook(useCounter)
+  expect(result.current.count).toBe(0)
+  act(() => result.current.increment())
+  expect(result.current.count).toBe(1)
+  act(() => result.current.decrement())
+  expect(result.current.count).toBe(0)
+})
+
+test('allows customization of the initial count', () => {
+  const {result} = renderHook(useCounter, {initialProps: {initialCount: 3}})
+  expect(result.current.count).toBe(3)
+})
+
+test('allows customization of the step', () => {
+  const {result} = renderHook(useCounter, {initialProps: {step: 2}})
+  expect(result.current.count).toBe(0)
+  act(() => result.current.increment())
+  expect(result.current.count).toBe(2)
+  act(() => result.current.decrement())
+  expect(result.current.count).toBe(0)
+})
+
+test('the step can be changed', () => {
+  const {result, rerender} = renderHook(useCounter, {
+    initialProps: {step: 3},
+  })
+  expect(result.current.count).toBe(0)
+  act(() => result.current.increment())
+  expect(result.current.count).toBe(3)
+  rerender({step: 2})
+  act(() => result.current.decrement())
+  expect(result.current.count).toBe(1)
+})
+
+```
